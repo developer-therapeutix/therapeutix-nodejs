@@ -13,7 +13,7 @@ const s3 = new AWS.S3({
 });
 
 router.post('/upload', authenticate, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  if (!req.file) return res.status(400).json({ error_code: 'NO_FILE_UPLOADED', error: 'No file uploaded' });
 
   const params = {
     Bucket: process.env.AWS_S3_BUCKET,
@@ -26,7 +26,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     const data = await s3.upload(params).promise();
     res.json({ url: data.Location });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error_code: 'S3_UPLOAD_FAILED', error: err.message });
   }
 });
 
@@ -43,7 +43,7 @@ router.get('/load/:key', authenticate, async (req, res) => {
     res.setHeader('Content-Disposition', `inline; filename="${req.params.key.split('/').pop()}"`);
     s3Stream.pipe(res);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error_code: 'S3_LOAD_FAILED', error: err.message });
   }
 });
 
@@ -59,7 +59,7 @@ router.get('/download/:key', authenticate, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${req.params.key.split('/').pop()}"`);
     s3Stream.pipe(res);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error_code: 'S3_DOWNLOAD_FAILED', error: err.message });
   }
 });
 

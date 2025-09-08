@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const questionSchema = new mongoose.Schema({
   id: String,
   text: String,
-  type: String // z.B. "text", "rating"
+  type: String
 });
 
 const questionnaireSchema = new mongoose.Schema({
