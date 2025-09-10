@@ -1,63 +1,68 @@
 
 const express = require('express');
 const bcrypt = require('bcrypt');
-const User = require('../models/User');
+// Switched from Mongoose model to DynamoDB repository
+const userRepo = require('../models/userRepo');
 const { authenticate, requireRole } = require('./middleware/helper');
 
 const router = express.Router();
 
 // list all users (admin only)
 router.get('/', authenticate, requireRole('Admin'), async (req, res) => {
-  const users = await User.find();
-  res.json(users);
+  const { users, lastEvaluatedKey } = await userRepo.listUsers({});
+  // Optionally strip password hashes
+  const sanitized = users.map(u => { const { password, ...rest } = u; return rest; });
+  res.json({ users: sanitized, lastEvaluatedKey });
 });
 
 router.get('/:id', authenticate, async (req, res) => {
-  const user = await User.findById(req.params.id);
+  console.log('Fetching user with ID:', req.params); // --- IGNORE ---
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json(user);
+  const { password, ...rest } = user;
+  res.json(rest);
 });
 
 // Get user by email
 router.get('/email/:email', authenticate, async (req, res) => {
-  const user = await User.findOne({ email: req.params.email });
+  const user = await userRepo.getUserByEmail(req.params.email);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  res.status(200).json(user);
+  const { password, ...rest } = user;
+  res.status(200).json(rest);
 });
 
 // Update profile
 router.put('/:id/update', authenticate, async (req, res) => {
+  console.log('Updating user:', req.params.id, req.body); // --- IGNORE ---
   const { name, gender, firstName, lastName, birthday, phonenumber, address, housenumber, postalCode, city, country, password } = req.body;
-  const user = await User.findById(req.params.id);
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
-  if (name) user.name = name;
-  if (gender) user.gender = gender;
-  if (firstName) user.firstName = firstName;
-  if (lastName) user.lastName = lastName;
-  if (birthday) user.birthday = birthday;
-  if (phonenumber) user.phonenumber = phonenumber;
-  if (address) user.address = address;
-  if (housenumber) user.housenumber = housenumber;
-  if (postalCode) user.postalCode = postalCode;
-  if (city) user.city = city;
-  if (country) user.country = country;
-  if (password) user.password =  await bcrypt.hash(password, 10);
-
-  await user.save();
+  const update = {};
+  if (name) update.name = name;
+  if (gender) update.gender = gender;
+  if (firstName) update.firstName = firstName;
+  if (lastName) update.lastName = lastName;
+  if (birthday) update.birthday = birthday;
+  if (phonenumber) update.phonenumber = phonenumber;
+  if (address) update.address = address;
+  if (housenumber) update.housenumber = housenumber;
+  if (postalCode) update.postalCode = postalCode;
+  if (city) update.city = city;
+  if (country) update.country = country;
+  if (password) update.password = await bcrypt.hash(password, 10);
+  await userRepo.updateUser(user.userId, update);
   res.status(200).json({ message: 'Profile updated' });
 });
 
 
 router.put('/:id/change-password', authenticate, async (req, res) => {
   const { oldPassword, newPassword } = req.body;
-  const user = await User.findById(req.params.id);
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
-
   const valid = await bcrypt.compare(oldPassword, user.password);
   if (!valid) return res.status(401).json({ error_code: 'INVALID_PASSWORD', error: 'Invalid credentials' });
-
-  user.password = await bcrypt.hash(newPassword, 10);
-  await user.save();
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await userRepo.updateUser(user.userId, { password: hashed });
   res.status(200).json({ message: 'Password changed successfully' });
 });
 
@@ -65,15 +70,17 @@ router.put('/:id/change-password', authenticate, async (req, res) => {
 
 // Delete user (admin only)
 router.delete('/:id', authenticate, requireRole('Admin'), async (req, res) => {
-  const user = await User.findByIdAndDelete(req.params.id);
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
+  await userRepo.deleteUser(user.userId);
   res.json({ message: 'User deleted' });
 });
 
 // Delete user self
 router.delete('/me/delete', authenticate, async (req, res) => {
-  const user = await User.findByIdAndDelete(req.user.id);
+  const user = await userRepo.getUserById(req.user.userId);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
+  await userRepo.deleteUser(user.userId);
   res.status(200).json({ message: 'User deleted' });
 });
 
@@ -81,17 +88,16 @@ router.delete('/me/delete', authenticate, async (req, res) => {
 
 // Approve user (admin only)
 router.post('/:id/approve', authenticate, requireRole('Admin'), async (req, res) => {
-  const user = await User.findById(req.params.id);
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
-  user.approved = true;
-  await user.save();
+  await userRepo.updateUser(user.userId, { approved: true });
   res.json({ message: 'User approved' });
 });
 
 
 // Get current user's role
 router.get('/:id/role', authenticate, async (req, res) => {
-  const user = await User.findById(req.params.id);
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
   res.json({ role: user.role });
 });
@@ -101,17 +107,17 @@ router.get('/:id/role', authenticate, async (req, res) => {
 router.post('/:id/assign-video', authenticate, requireRole('Admin', 'Therapist', 'Practice'), async (req, res) => {
   const { videoKey, title, description } = req.body;
   if (!videoKey) return res.status(400).json({ error_code: 'MISSING_VIDEO_KEY', error: 'videoKey required' });
-  const user = await User.findById(req.params.id);
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
-  if (!user.tasks) user.tasks = [];
-  user.tasks.push({
+  const tasks = user.tasks || [];
+  tasks.push({
     videoKey,
     title: title || 'Video Task',
     description: description || '',
-    assignedAt: new Date()
+    assignedAt: new Date().toISOString()
   });
-  await user.save();
-  res.json({ message: 'Video assigned as task', tasks: user.tasks });
+  await userRepo.updateUser(user.userId, { tasks });
+  res.json({ message: 'Video assigned as task', tasks });
 });
 
 
@@ -119,10 +125,9 @@ router.post('/:id/assign-video', authenticate, requireRole('Admin', 'Therapist',
 // Body: { "enabled": true } or { "enabled": false }
 router.post('/:id/enable', authenticate, requireRole('Admin'), async (req, res) => {
   const { enabled } = req.body;
-  const user = await User.findById(req.params.id);
+  const user = await userRepo.getUserById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
-  user.enabled = !!enabled;
-  await user.save();
+  await userRepo.updateUser(user.userId, { enabled: !!enabled });
   res.json({ message: `User ${enabled ? 'enabled' : 'disabled'}` });
 });
 

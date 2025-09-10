@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
-const User = require('../../models/User');
+// Switched from Mongoose User model to DynamoDB user repository
+const userRepo = require('../../models/userRepo');
 
 // Middleware to check JWT and set req.user
 const authenticate = async (req, res, next) => {
@@ -10,9 +11,10 @@ const authenticate = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id);
-    if (!req.user) return res.status(401).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
-    if (!req.user.enabled) return res.status(403).json({ error_code: 'USER_DISABLED', error: 'User is disabled' });
+    const user = await userRepo.getUserById(decoded.id);
+    if (!user) return res.status(401).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
+    if (user.enabled === false) return res.status(403).json({ error_code: 'USER_DISABLED', error: 'User is disabled' });
+    req.user = user;
     next();
   } catch (err) {
     console.log(err);
