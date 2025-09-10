@@ -1,8 +1,5 @@
-const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../../models/User');
-
-const router = express.Router();
 
 // Middleware to check JWT and set req.user
 const authenticate = async (req, res, next) => {
@@ -33,7 +30,9 @@ const requireRole = (...roles) => {
   };
 };
 
+
+
 module.exports = {
   authenticate,
-  requireRole
+  requireRole,
 };

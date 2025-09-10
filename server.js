@@ -5,6 +5,7 @@ const authRoutes = require('./routes/middleware/auth');
 const supportRoutes = require('./routes/support');
 const userRoutes = require('./routes/user');
 const questionnaireRoutes = require('./routes/questionnaire');
+const imagesRoutes = require('./routes/images');
 
 const app = express();
 // Use a higher JSON limit only for support route to allow base64 attachments
@@ -16,6 +17,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
+app.use('/api/images', imagesRoutes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
@@ -23,13 +25,3 @@ mongoose.connect(process.env.MONGO_URI)
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-
-
-// const { sendMail } = require('./mailer');
-//  sendMail({
-//   to: 'uemit.sahin@therapeutix.de',
-//   subject: 'Test Email',
-//   text: 'Hello from Therapeutix!',
-//   html: '<b>Hello from Therapeutix!</b>'
-// });

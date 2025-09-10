@@ -58,17 +58,15 @@ router.post('/send', authenticate,  async (req, res) => {
             : [];
 
         // Persist to DB
-    const doc = await SupportRequest.create({
+        const doc = await SupportRequest.create({
             user: req.user._id,
             subject,
             message,
             attachments: normalizedAttachments,
         });
 
-        console.log('Support Request saved:', doc._id.toString());
-
         // Respond early so email latency doesn't block the client
-    res.status(201).json({ message: 'Support request submitted successfully', id: doc._id, ticketId: doc.ticketId });
+        res.status(201).json({ message: 'Support request submitted successfully', id: doc._id, ticketId: doc.ticketId });
 
         // Send emails asynchronously (no await)
         const htmlBody = `<div style="white-space:pre-wrap; word-break:break-word;">${escapeHtml(message)}</div>`;
@@ -106,7 +104,7 @@ router.post('/send', authenticate,  async (req, res) => {
             attachments: emailAttachments,
         });
 
-                // Confirmation to user
+        // Confirmation to user
         const displayName = req.user.firstName || req.user.email;
         const footerImagePath = path.join(__dirname, '..', 'assets', 'images', 'Therapeutix_Logo+Claim_hoch.png');
         const brandColor = '#379596';

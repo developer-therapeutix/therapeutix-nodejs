@@ -25,18 +25,9 @@ router.get('/email/:email', authenticate, async (req, res) => {
   res.status(200).json(user);
 });
 
-// router.get('/:email', authenticate, async (req, res) => {
-//   console.log(req.params.email);
-
-//   const user = await User.findOne({ email: req.params.email });
-//   if (!user) return res.status(404).json({ error: 'User not found' });
-//   res.json(user);
-// });
-
-
 // Update profile
 router.put('/:id/update', authenticate, async (req, res) => {
-  const { name, gender, firstName, lastName, birthday, address, housenumber, postalCode, city, country, password } = req.body;
+  const { name, gender, firstName, lastName, birthday, phonenumber, address, housenumber, postalCode, city, country, password } = req.body;
   const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
   if (name) user.name = name;
@@ -44,6 +35,7 @@ router.put('/:id/update', authenticate, async (req, res) => {
   if (firstName) user.firstName = firstName;
   if (lastName) user.lastName = lastName;
   if (birthday) user.birthday = birthday;
+  if (phonenumber) user.phonenumber = phonenumber;
   if (address) user.address = address;
   if (housenumber) user.housenumber = housenumber;
   if (postalCode) user.postalCode = postalCode;
@@ -80,7 +72,6 @@ router.delete('/:id', authenticate, requireRole('Admin'), async (req, res) => {
 
 // Delete user self
 router.delete('/me/delete', authenticate, async (req, res) => {
-  console.log(req.user);
   const user = await User.findByIdAndDelete(req.user.id);
   if (!user) return res.status(404).json({ error_code: 'USER_NOT_FOUND', error: 'User not found' });
   res.status(200).json({ message: 'User deleted' });
