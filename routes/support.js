@@ -1,7 +1,7 @@
 
 const express = require('express');
 const { authenticate } = require('./middleware/helper');
-const { sendMail } = require('./middleware/mailer');
+const { sendMail, sendNoReplyMail, sendSupportMail } = require('./middleware/mailer');
 const { buildSupportRequestMail } = require('./mailing');
 // DynamoDB repository (replaces Mongoose SupportRequest model)
 const supportRepo = require('../models/supportRequestRepo');
@@ -97,7 +97,7 @@ router.post('/send', authenticate,  async (req, res) => {
 
         sendMail({
             to: process.env.SUPPORT_EMAIL,
-            subject: `[${doc.ticketId}] ${subject}`,
+            subject: `New Support Request - [${doc.ticketId}] ${subject}`,
             text: message,
             html: `<p><strong>Ticket:</strong> ${doc.ticketId}</p>${htmlBody}`,
             attachments: emailAttachments,
@@ -113,7 +113,7 @@ router.post('/send', authenticate,  async (req, res) => {
             messageHtml,
             language: req.user.language
         });
-        sendMail({
+        sendSupportMail({
             to: req.user.email,
             subject: `Support Request Received (${doc.ticketId})`,
             text: `Dear ${displayName},\n\nWe have received your support request with the subject "${subject}". Your request will be handled under the ID ${doc.ticketId}. Our team will get back to you shortly.\n\nBest regards,\nTherapeutix Support Team`,
@@ -122,6 +122,35 @@ router.post('/send', authenticate,  async (req, res) => {
     } catch (err) {
         console.error('Support Request error:', err);
         res.status(500).json({ error_code: 'SUPPORT_SEND_FAILED', error: 'Could not submit support request' });
+    }
+});
+
+router.get('/cases', authenticate, async (req, res) => {
+    try {
+        // const filter = req.user.roles && req.user.roles.includes('Admin') ? {} : { userId: req.user.userId };
+        const requests = await supportRepo.listSupportRequestsByUser(userId = req.user.userId);
+        res.status(200).json({ requests });
+    } catch (err) {
+        console.error('List Support Requests error:', err);
+        res.status(500).json({ error_code: 'SUPPORT_LIST_FAILED', error: 'Could not list support requests' });
+    }
+});
+
+router.get('/cases/:ticketId', authenticate, async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        const request = await supportRepo.getSupportRequest(ticketId);
+        if (!request) {
+            return res.status(404).json({ error_code: 'TICKET_NOT_FOUND', error: 'Support request not found' });
+        }
+        // Non-admins can only access their own requests
+        if (request.userId !== req.user.userId && !(req.user.roles && req.user.roles.includes('Admin'))) {
+            return res.status(403).json({ error_code: 'FORBIDDEN', error: 'Access to this support request is forbidden' });
+        }
+        res.status(200).json({ request });
+    } catch (err) {
+        console.error('Get Support Request error:', err);
+        res.status(500).json({ error_code: 'SUPPORT_GET_FAILED', error: 'Could not get support request' });
     }
 });
 

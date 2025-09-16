@@ -1,14 +1,14 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-// Replaced Mongoose User model with DynamoDB repository
 const userRepo = require('../../models/userRepo');
 const { authenticate } = require('./helper');
 const { verifyMail, subscribeNewsletterMail, resetPasswordMail } = require('../mailing');
-const { sendMail } = require('./mailer');
+const { sendNoReplyMail } = require('./mailer');
 const { getTranslation } = require('../translations');
 
 const router = express.Router();
+
 // Check if email exists (async validation)
 router.get('/check-email/:email', async (req, res) => {
   const { email } = req.params;
@@ -40,17 +40,42 @@ router.get('/verify-email', async (req, res) => {
 
 // Register
 router.post('/register', async (req, res) => {
+
+  const start = Date.now();
+  let hashDuration = 0;
+  let createDuration = 0;
+  let subscribeEmailDuration = 0;
+  let verifyEmailDuration = 0;
+
   const { email, password, eulaAccepted, newsletterSubscribed, language } = req.body;
-  if (!email || !password) return res.status(400).json({ error_code: 'MISSING_CREDENTIALS', error: 'Email and password required' });
+  if (!email || !password) {
+    console.log(`[register] action=MISSING_CREDENTIALS email=${email || '-'} duration=${Date.now() - start}ms`);
+    return res.status(400).json({ error_code: 'MISSING_CREDENTIALS', error: 'Email and password required' });
+  }
+
   const existing = await userRepo.getUserByEmail(email);
-  if (existing) return res.status(409).json({ error_code: 'EMAIL_EXISTS', error: 'Email already exists' });
+  if (existing) {
+    console.log(`[register] action=EMAIL_EXISTS email=${email} duration=${Date.now() - start}ms`);
+    return res.status(409).json({ error_code: 'EMAIL_EXISTS', error: 'Email already exists' });
+  }
+
+  const hashStart = Date.now();
   const hashedPassword = await bcrypt.hash(password, 10);
+  hashDuration = Date.now() - hashStart;
+  console.log(`[register] action=PASSWORD_HASHED email=${email} hashDuration=${hashDuration}ms`);
+
   let user;
   try {
+    const createStart = Date.now();
     user = await userRepo.createUser({ email, passwordHash: hashedPassword, eulaAccepted, language, newsletterSubscribed });
+    createDuration = Date.now() - createStart;
+    console.log(`[register] action=USER_CREATED email=${email} userId=${user.userId} createDuration=${createDuration}ms`);
   } catch (err) {
-    if (err.code === 'EMAIL_EXISTS') return res.status(409).json({ error_code: 'EMAIL_EXISTS', error: 'Email already exists' });
-    console.log(err);
+    if (err.code === 'EMAIL_EXISTS') {
+      console.log(`[register] action=CREATE_FAILED_EMAIL_EXISTS email=${email} duration=${Date.now() - start}ms`);
+      return res.status(409).json({ error_code: 'EMAIL_EXISTS', error: 'Email already exists' });
+    }
+    console.log(`[register] action=CREATE_FAILED email=${email} duration=${Date.now() - start}ms error=${err.message}`);
     return res.status(500).json({ error_code: 'CREATE_FAILED', error: 'Failed to create user' });
   }
 
@@ -65,32 +90,42 @@ router.post('/register', async (req, res) => {
       subscribeNewsletterExpires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     });
     try {
-      await sendMail({
+      const subscribeStart = Date.now();
+      await sendNoReplyMail({
         to: user.email,
         subject: translation.subscribe.subject || 'Confirm subscription to our newsletter',
         html: subscribeNewsletterMail(subscribeNewsletterToken, user.language)
       });
+      subscribeEmailDuration = Date.now() - subscribeStart;
+      console.log(`[register] action=SUBSCRIBE_EMAIL_SENT email=${email} duration=${subscribeEmailDuration}ms`);
     } catch (err) {
-      console.log(err);
+      console.log(`[register] action=SUBSCRIBE_EMAIL_FAILED email=${email} duration=${Date.now() - start}ms error=${err.message}`);
       return res.status(500).json({ error_code: 'EMAIL_SEND_FAILED', error: 'Failed to send subscribe newsletter email' });
     }
   }
 
-  const emailVerificationToken = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, { expiresIn: '15m' });
+  const emailVerificationToken = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, { expiresIn: '1d' });
   await userRepo.updateUser(user.userId, {
     emailVerificationToken,
-    emailVerificationExpires: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+    emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   });
 
   try {
-    await sendMail({
+    const verifyStart = Date.now();
+    await sendNoReplyMail({
       to: user.email,
       subject: translation.verify.subject || 'Please verify your email',
       html: verifyMail(emailVerificationToken, user.language)
     });
+    verifyEmailDuration = Date.now() - verifyStart;
+    console.log(`[register] action=VERIFY_EMAIL_SENT email=${email} duration=${verifyEmailDuration}ms`);
   } catch (err) {
+    console.log(`[register] action=VERIFY_EMAIL_FAILED email=${email} duration=${Date.now() - start}ms error=${err.message}`);
     return res.status(500).json({ error_code: 'EMAIL_SEND_FAILED', error: 'Failed to send verification email' });
   }
+
+  const total = Date.now() - start;
+  console.log(`[register] action=COMPLETE email=${email} userId=${user.userId} total=${total}ms hash=${hashDuration}ms create=${createDuration}ms subscribe=${subscribeEmailDuration}ms verify=${verifyEmailDuration}ms`);
 
   res.status(201).json({ message: 'User created', userId: user.userId, emailVerificationToken });
 });
@@ -120,7 +155,7 @@ router.post('/login', async (req, res) => {
   if (user.role !== 'Admin' && !user.approved && new Date(user.createdAt) < new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)) {
     return res.status(403).json({ error_code: 'NOT_APPROVED', message: 'User not approved by admin yet.' });
   }
-  const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, { expiresIn: '15m' });
+  const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
   const refreshToken = require('crypto').randomBytes(64).toString('hex');
   await userRepo.updateUser(user.userId, {
     refreshToken,
@@ -142,7 +177,7 @@ router.post('/refresh-token', async (req, res) => {
   if (!user.refreshTokenExpires || new Date(user.refreshTokenExpires) < new Date()) {
     return res.status(401).json({ error_code: 'TOKEN_EXPIRED', error: 'Refresh token expired' });
   }
-  const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, { expiresIn: '15m' });
+  const token = jwt.sign({ id: user.userId }, process.env.JWT_SECRET, { expiresIn: '1d' });
   const newRefreshToken = require('crypto').randomBytes(64).toString('hex');
   await userRepo.updateUser(user.userId, {
     refreshToken: newRefreshToken,
@@ -180,7 +215,7 @@ router.post('/send-reset-password-email', async (req, res) => {
 
   // Send reset password email
   try {
-    await sendMail({
+    await sendNoReplyMail({
       to: user.email,
       subject: translation.reset.subject || 'Reset your password',
       html: resetPasswordMail(resetPasswordToken, user.language)
